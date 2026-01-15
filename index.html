@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Advanced SKU Manager</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <style>
+        .editable-cell:focus { background-color: #fef9c3; outline: 2px solid #eab308; border-radius: 4px; }
+    </style>
+</head>
+<body class="bg-slate-50 min-h-screen p-4 pb-20">
+
+    <div class="max-w-6xl mx-auto">
+        <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 mb-6 flex flex-col md:flex-row justify-between items-center gap-4">
+            <div>
+                <h1 class="text-2xl font-bold text-slate-800">📊 SKU Data Manager</h1>
+                <p class="text-slate-500 text-sm">Upload folders, preview data, edit quantities, and export to Excel.</p>
+            </div>
+            <div class="flex gap-3">
+                <input type="text" id="yearName" value="2025" class="border rounded-lg px-3 py-2 w-24 text-center font-bold">
+                <button onclick="processFiles()" id="exportBtn" class="hidden bg-green-600 hover:bg-green-700 text-white px-6 py-2 rounded-lg font-bold shadow-md transition-all">
+                    📥 Download Excel
+                </button>
+            </div>
+        </div>
+
+        <div id="uploadZone" class="bg-white border-4 border-dashed border-blue-100 rounded-2xl p-10 text-center hover:bg-blue-50 transition-all cursor-pointer mb-6">
+            <input type="file" id="fileInput" webkitdirectory mozdirectory directory multiple class="hidden">
+            <label for="fileInput" class="cursor-pointer">
+                <div class="text-5xl mb-4">📂</div>
+                <div class="text-xl font-bold text-blue-700">Select the Main Year Folder</div>
+                <p class="text-slate-500 mt-2 text-sm">Pick the folder containing your month subfolders (NOV, DEC, etc.)</p>
+            </label>
+        </div>
+
+        <div id="previewContainer" class="hidden bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+            <div class="bg-slate-800 p-4 flex justify-between items-center text-white">
+                <h2 class="font-bold">Data Preview (Editable)</h2>
+                <span id="fileSummary" class="text-xs bg-slate-700 px-3 py-1 rounded-full"></span>
+            </div>
+            <div class="overflow-x-auto max-h-[600px]">
+                <table class="w-full text-left border-collapse">
+                    <thead class="bg-slate-100 sticky top-0 shadow-sm">
+                        <tr>
+                            <th class="p-3 text-sm font-bold text-slate-600 border-b">Month</th>
+                            <th class="p-3 text-sm font-bold text-slate-600 border-b">SKU</th>
+                            <th class="p-3 text-sm font-bold text-slate-600 border-b">QTY (Click to Edit)</th>
+                            <th class="p-3 text-sm font-bold text-slate-600 border-b">Source File</th>
+                        </tr>
+                    </thead>
+                    <tbody id="previewBody" class="divide-y divide-slate-100 text-slate-700">
+                        </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const fileInput = document.getElementById('fileInput');
+        const previewContainer = document.getElementById('previewContainer');
+        const previewBody = document.getElementById('previewBody');
+        const exportBtn = document.getElementById('exportBtn');
+        const fileSummary = document.getElementById('fileSummary');
+
+        let masterData = []; // To keep track of everything
+
+        fileInput.addEventListener('change', async (e) => {
+            const files = Array.from(e.target.files).filter(f => f.name.endsWith('.txt'));
+            if (files.length === 0) return;
+
+            masterData = [];
+            const monthMap = {"01":"JAN","02":"FEB","03":"MAR","04":"APR","05":"MAY","06":"JUN","07":"JUL","08":"AUG","09":"SEP","10":"OCT","11":"NOV","12":"DEC"};
+
+            for (let file of files) {
+                const text = await file.text();
+                const lines = text.split(/\r?\n/).map(l => l.trim()).filter(l => l !== "");
+                
+                // Extract month from name (16.11.2025.txt)
+                const match = file.name.match(/\.(\d{1,2})\./);
+                const monthName = match ? (monthMap[match[1].padStart(2, '0')] || "OTHER") : "OTHER";
+
+                const counts = {};
+                lines.forEach(sku => { counts[sku] = (counts[sku] || 0) + 1; });
+
+                Object.entries(counts).forEach(([sku, qty]) => {
+                    masterData.push({
+                        month: monthName,
+                        sku: sku,
+                        qty: qty,
+                        fileName: file.name.replace('.txt', '')
+                    });
+                });
+            }
+
+            renderPreview();
+            previewContainer.classList.remove('hidden');
+            exportBtn.classList.remove('hidden');
+            fileSummary.innerText = `Found ${files.length} files | ${masterData.length} unique SKU entries`;
+        });
+
+        function renderPreview() {
+            previewBody.innerHTML = '';
+            masterData.forEach((item, index) => {
+                const row = document.createElement('tr');
+                row.className = "hover:bg-slate-50 transition-colors";
+                row.innerHTML = `
+                    <td class="p-3 text-sm font-medium text-slate-500 border-b">${item.month}</td>
+                    <td class="p-3 text-sm font-bold text-slate-800 border-b">${item.sku}</td>
+                    <td class="p-3 text-sm border-b">
+                        <div contenteditable="true" 
+                             onblur="updateQty(${index}, this.innerText)" 
+                             class="editable-cell font-bold text-blue-600 cursor-pointer p-1">
+                             ${item.qty}
+                        </div>
+                    </td>
+                    <td class="p-3 text-xs text-slate-400 border-b italic">${item.fileName}</td>
+                `;
+                previewBody.appendChild(row);
+            });
+        }
+
+        function updateQty(index, newVal) {
+            const num = parseInt(newVal);
+            if (!isNaN(num)) {
+                masterData[index].qty = num;
+            } else {
+                alert("Please enter a valid number");
+                renderPreview();
+            }
+        }
+
+        function processFiles() {
+            const yearName = document.getElementById('yearName').value;
+            const wb = XLSX.utils.book_new();
+            
+            // Group by Month for Sheets
+            const sheets = {};
+            const annualTotals = {};
+
+            masterData.forEach(item => {
+                if (!sheets[item.month]) sheets[item.month] = [];
+                sheets[item.month].push({
+                    "SKU": item.sku,
+                    "QTY": item.qty,
+                    "Date/File": item.fileName
+                });
+
+                annualTotals[item.sku] = (annualTotals[item.sku] || 0) + item.qty;
+            });
+
+            // 1. Add Monthly Sheets
+            const monthOrder = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"];
+            Object.keys(sheets).sort((a,b) => monthOrder.indexOf(a) - monthOrder.indexOf(b)).forEach(m => {
+                const ws = XLSX.utils.json_to_sheet(sheets[m]);
+                XLSX.utils.book_append_sheet(wb, ws, m);
+            });
+
+            // 2. Add Annual Summary
+            const summaryArray = Object.entries(annualTotals).map(([sku, qty]) => ({ "SKU": sku, "TOTAL QTY": qty }));
+            summaryArray.sort((a, b) => b["TOTAL QTY"] - a["TOTAL QTY"]);
+            const wsSummary = XLSX.utils.json_to_sheet(summaryArray);
+            XLSX.utils.book_append_sheet(wb, wsSummary, "ANNUAL SUMMARY");
+
+            XLSX.writeFile(wb, `${yearName}_Consolidated_Report.xlsx`);
+        }
+    </script>
+</body>
+</html>
